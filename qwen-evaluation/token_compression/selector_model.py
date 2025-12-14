@@ -182,10 +182,14 @@ class Qwen2_5_VisionTransformerPretrainedModel_Selector(Qwen2_5_VisionTransforme
         # ---------------------------add--------------------------------------------------------
         total_token_num = hidden_states.shape[0]
         hidden_states_unsqueezed = hidden_states.unsqueeze(0)
+        # detach：复制一份参数，但其不参与梯度计算
         learned_scores = self.importance_scorer(hidden_states_unsqueezed.detach()).squeeze(0) 
         dominant_num = max(1, int(total_token_num * self.budgets))
+        # tensor自带的topk方法，索引是按分数从大到小排列的（会打乱原有顺序）
+        # 因此在后面还要sort一次恢复原有顺序
         all_indices = learned_scores.topk(dominant_num, dim=0).indices   # get topk indices
         all_indices = all_indices.sort().values
+        # 布尔索引只保留topk的token，且相对顺序不变
         hidden_states_new = hidden_states[all_indices,:]
         self.last_combined_scores = topk(learned_scores.unsqueeze(0), dominant_num).squeeze(0)
         self.last_selected_indices = all_indices

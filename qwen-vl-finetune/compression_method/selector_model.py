@@ -50,6 +50,8 @@ from torch.autograd import Function
 sigmoid = torch.sigmoid
 sigmoid_grad = vmap(vmap(grad(sigmoid)))
 
+# Function是torch里的，因为这里需要定义反向传播
+# 二分求t无需反向传播，因此需手写反向传播逻辑
 class TopK(Function):
     @staticmethod
     def forward(ctx, xs, k):
@@ -85,6 +87,7 @@ def _find_ts(xs, k):
     ts = (lo + hi)/2
     return ts, sigmoid(xs + ts)
 
+# 转成和nn.module一样的调用方式
 topk = TopK.apply
 # --- End of new Differentiable TopK implementation ---
 
@@ -157,10 +160,13 @@ def qwen25vl_vision_tower_forward_selector(self, hidden_states: torch.Tensor, gr
 
     # ---------------------------add---------------------------------------------
     hidden_states_unsqueezed = hidden_states.unsqueeze(0)
+    # 已经注入，就是打分器
     learned_scores = self.importance_scorer(hidden_states_unsqueezed).squeeze(0)
     total_tokens = learned_scores.shape[0]
+    # 保留token的数量，k个
     k = int(total_tokens * self.budgets)
     img_mask = topk(learned_scores.unsqueeze(0), k).squeeze(0)
+    # 拓展到hidden_dim
     img_mask_expanded = img_mask.unsqueeze(1).expand(-1, hidden_states_unsqueezed.shape[-1])
     hidden_states_new = img_mask_expanded*hidden_states
     hidden_states_new = hidden_states_new.type(hidden_states.dtype)
@@ -168,12 +174,16 @@ def qwen25vl_vision_tower_forward_selector(self, hidden_states: torch.Tensor, gr
     with torch.no_grad():
         constraint_topk_indices = learned_scores.topk(k, dim=0).indices
         constraint_img_mask = torch.zeros_like(learned_scores, device=learned_scores.device)
+        # scatter_：按照索引位置填充指定的值
+        # 这里是找出前k个对应的位置填充为1
         constraint_img_mask.scatter_(dim=-1, index=constraint_topk_indices, value=1.0)
     # -------------------------------------------------------------------------------
+    # 返回：可微topk后的hidden_states，软掩膜，硬掩膜
     return hidden_states_new, img_mask, constraint_img_mask
 
 
-
+# mllm总的forward，会用他会用视觉编码器的forward
+# 原本qwen模型的forward改成了这个
 def qwen25vl_generation_forward_selector(
     self,
     input_ids: torch.LongTensor = None,
@@ -204,7 +214,10 @@ def qwen25vl_generation_forward_selector(
         inputs_embeds = self.model.embed_tokens(input_ids)
         if pixel_values is not None:
             pixel_values = pixel_values.type(self.visual.dtype)
+            # 这里的visual已经用创新代码替换了
             image_embeds, img_mask, constraint_img_mask = self.visual(pixel_values, grid_thw=image_grid_thw)
+            # 检查视觉特征数量是否与文本中的图像占位符数量一致
+            # image_token_id固定，和input_ids计算布尔索引后求和
             n_image_tokens = (input_ids == self.config.image_token_id).sum().item()
             n_image_features = image_embeds.shape[0]
             if n_image_tokens != n_image_features:
@@ -217,11 +230,13 @@ def qwen25vl_generation_forward_selector(
             mask_expanded = mask_unsqueezed.expand_as(inputs_embeds)
             image_mask = mask_expanded.to(inputs_embeds.device)
 
+            # 将input_embeds中对应图像token的位置替换为视觉特征
             image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
         if pixel_values_videos is not None:
             pixel_values_videos = pixel_values_videos.type(self.visual.dtype)
+            # 和上面图像的一样
             video_embeds = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
             n_video_tokens = (input_ids == self.config.video_token_id).sum().item()
             n_video_features = video_embeds.shape[0]
@@ -272,6 +287,7 @@ def qwen25vl_generation_forward_selector(
             position_ids = position_ids.add(delta)
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
+    # 视觉特征已经填入了inputs_embeds里了，可调用model的forward
     outputs = self.model(
         input_ids=None,
         position_ids=position_ids,
@@ -286,6 +302,8 @@ def qwen25vl_generation_forward_selector(
     )
 
     hidden_states = outputs[0]
+    # 预测的结果，最后一个维度是词表大小（没归一化的分布）
+    # 每一个预测位置，都是结合其前面所有内容的结果，计算自注意力时会屏蔽token位置后面的所有内容
     logits = self.lm_head(hidden_states)
     
 
@@ -294,20 +312,35 @@ def qwen25vl_generation_forward_selector(
         # Upcast to float if we need to compute the loss to avoid potential precision issues
         logits = logits.float()
         # Shift so that tokens < n predict n
+        # 错位，logits去掉最后一个，labels去掉第一个
+        # 对齐后，logict是参考了该位置及之前所有内容的预测分布，用来预测下一个位置的label
+        # 让llm学到看到前几个字后，可以猜出下一个字是什么
+        #                                   ——也就是学到语言统计规律、语法、语义、世界知识
+        # 另外，这里喂的数据是图像理解的数据，有图有文字（图已经和文字对齐了），llm也会学会结合图像内容来预测文字
+        # 若llm已经预训练，llm已经基本学会了语法这种宏观的知识，在此基础上学会结合图像内容来预测文字效果更好
         shift_logits = logits[..., :-1, :].contiguous()
+        # 注意：错位后的labels删掉了bos，但没删掉eos
+        # 使得llm可以在前面的序列是什么样的情况下要输出eos
         shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens
         loss_fct = CrossEntropyLoss()
+        # 定长seq_len的好处是可以直接拉平
         shift_logits = shift_logits.view(-1, self.config.vocab_size)
         shift_labels = shift_labels.view(-1)
         # Enable model parallelism
         shift_labels = shift_labels.to(shift_logits.device)
+        # 交叉熵：一个位置的预测分布和真实分布之间的距离，多个的话就是求平均
+        #                                                       ——也就是衡量预测效果
         loss = loss_fct(shift_logits, shift_labels)
         # print('ce loss: {:.5f}'.format(loss.item()))
 
+        # 以上是下游任务
         # --------------------------------add---------------------------------------------
+        # 这里让llm额外学会在视觉特征不全的时候也能保持下游任务的效果（这里是单纯的llm推测）
         if pixel_values is not None:
+            # 二值交叉熵，预测的软掩膜和硬掩膜之间的距离
             constraint_loss = F.binary_cross_entropy(img_mask, constraint_img_mask)
+            # 课程退火策略的动态权重，在每次执行这个forward之前计算好
             loss += self.regularization_weight * constraint_loss
             # print('soft regularization_loss: {:.5f}'.format(self.regularization_weight * constraint_loss.item()))
         # -------------------------------------------------------------------------------

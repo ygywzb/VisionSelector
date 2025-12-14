@@ -67,6 +67,7 @@ class ScheduledWeightTrainer(Trainer):
         """
         Overrides compute_loss to dynamically calculate regularization_weight.
         """
+        # 这里就是计算regularization_weight，然后让llm里总的forward用这个regularization_weight
         total_steps = self.state.max_steps
         current_step = self.state.global_step
 
@@ -80,6 +81,7 @@ class ScheduledWeightTrainer(Trainer):
 
         # Set the calculated weight on the actual model
         actual_model = model.module if hasattr(model, 'module') else model
+        # 设置给model里的regularization_weight，让model的forward里用
         actual_model.regularization_weight = current_weight
 
         # Log the weight
@@ -89,6 +91,7 @@ class ScheduledWeightTrainer(Trainer):
                 print(f"\n[Step {self.state.global_step}] Set regularization_weight to: {current_weight:.4f}")
 
         # Call the parent's compute_loss method
+        # 调用llm自己的forward
         return super().compute_loss(model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch)
 
 
@@ -187,7 +190,9 @@ def train(attn_implementation="flash_attention_2"):
         raise ValueError("Model not currently supported")
         
     # ----------------------------add compressor setup-------------------------------
+    # 视觉特征预算，一个小数，保留多少的token，0.3表示保留30%的token
     model.visual.budgets = model_args.budget
+    # 这里换的是视觉编码的forward
     model.visual.forward = types.MethodType(qwen25vl_vision_tower_forward_selector, model.visual)
     if "3b" in model_args.model_name_or_path.lower():
         print("3b")
@@ -197,6 +202,7 @@ def train(attn_implementation="flash_attention_2"):
         model.visual.importance_scorer = TransformerScorer(in_features=3584,hidden_dim=1792)
     else:
         raise ValueError("Model not currently supported")
+    # 这里换的是整个model的forward
     model.forward = types.MethodType(qwen25vl_generation_forward_selector, model)
     # -------------------------------------------------------------------------------
 

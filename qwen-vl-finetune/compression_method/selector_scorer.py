@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from typing import Optional
 
 
+# 打分器
+# 功能直到算出注意力矩阵后求平均这一步
 class TransformerScorer(nn.Module):
     """
     Lightweight Transformer Scorer using simplified attention for importance scoring.

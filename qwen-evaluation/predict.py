@@ -150,6 +150,9 @@ def run_inference_qwen25vl(args):
     pad_token_id = qwen25vl_tokenizer.pad_token_id
 
     # generate
+    # 推理过程：
+    # 训练时把“问+答+EOS”作为完整序列，只计算前文预测后文的损失。
+    # 推理时输入“问”部分，LLM自回归补全“答”直到预测EOS，自然停止。
     cont = model.generate(
         **inputs,
         eos_token_id= qwen25vl_tokenizer.eos_token_id,
