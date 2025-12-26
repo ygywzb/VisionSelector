@@ -248,20 +248,25 @@ class Qwen2_5_VLForConditionalGeneration_Selector(Qwen2_5_VLForConditionalGenera
                 pixel_values = pixel_values.type(self.visual.dtype)
                 image_embeds, all_indices, visual_token_num = self.visual(pixel_values, grid_thw=image_grid_thw)
                 origin_image_indices = torch.where(input_ids == self.config.image_token_id)[1]
+                # 只包含topk后的index
                 retain_image_indices = origin_image_indices[all_indices]
                 origin_text_indices = torch.where(input_ids != self.config.image_token_id)[1]
+                # topk的index和所有text的index，归为正确顺序
                 combined_indices = torch.cat((retain_image_indices, origin_text_indices))
                 selected_indices, _ = torch.sort(combined_indices)
 
+                # id和embeds全筛
                 origin_input_ids = deepcopy(input_ids)
                 input_ids = input_ids[:,selected_indices]
                 inputs_embeds = inputs_embeds[:,selected_indices,:]
 
+                # 通过看id是否为img的id来生成mask
                 mask = input_ids == self.config.image_token_id
                 mask_unsqueezed = mask.unsqueeze(-1)
                 mask_expanded = mask_unsqueezed.expand_as(inputs_embeds)
                 image_mask = mask_expanded.to(inputs_embeds.device)
 
+                # embed里图像部分换为实际的视觉token
                 image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
