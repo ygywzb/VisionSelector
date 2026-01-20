@@ -3,3 +3,6 @@ datasets
 
 !datasets/filter_json.py
 !datasets/sample_merge_json_llavaov.py
+
+pretrained
+pretrained/
