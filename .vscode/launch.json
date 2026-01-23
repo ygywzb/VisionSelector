@@ -1,0 +1,60 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "QwenVL_Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/qwen-vl-finetune/qwenvl/train/train_qwen_selector_debug.py",
+      "cwd": "${workspaceFolder}/qwen-vl-finetune",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT": "300",
+        "CUDA_VISIBLE_DEVICES": "0",
+        "TORCH_DISTRIBUTED_RUN_TIMEOUT": "3600"
+      },
+
+      "args": [
+        "--deepspeed", "${workspaceFolder}/qwen-vl-finetune/scripts/zero3.json",
+        "--model_name_or_path", "${workspaceFolder}/pretrained/Qwen2_5-VL-3B",
+        "--dataset_use", "chartqa,coco%10,ocr_vqa",
+        "--data_flatten", "True",
+        "--tune_mm_vision", "False",
+        "--tune_mm_mlp", "False",
+        "--tune_mm_llm", "False",
+        "--tune_compressor", "True",
+        "--budget", "0.2",
+        "--bf16",
+        "--output_dir", "${workspaceFolder}/output_ckpt/VisionSelector-Qwen2.5-VL-3B-debug",
+        "--num_train_epochs", "1",
+        "--reg_weight_start", "0.1",
+        "--reg_weight_end", "2.0",
+        "--per_device_train_batch_size", "2",
+        "--per_device_eval_batch_size", "4",
+        "--gradient_accumulation_steps", "8",
+        "--max_pixels", "50176",
+        "--min_pixels", "784",
+        "--eval_strategy", "no",
+        "--save_strategy", "steps",
+        "--save_steps", "200",
+        "--save_total_limit", "1",
+        "--learning_rate", "5e-5",
+        "--weight_decay", "0",
+        "--warmup_ratio", "0.03",
+        "--max_grad_norm", "1",
+        "--lr_scheduler_type", "cosine",
+        "--logging_steps", "1",
+        "--model_max_length", "8192",
+        "--gradient_checkpointing", "True",
+        "--dataloader_num_workers", "4",
+        "--run_name", "qwen25vl-debug-single",
+        "--seed", "42",
+        "--data_seed", "42",
+        "--report_to", "none"
+      ]
+    }
+  ]
+}

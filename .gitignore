@@ -6,3 +6,9 @@ datasets
 
 pretrained
 pretrained/
+
+output_ckpt
+output_ckpt/
+
+*.pyc
+__pycache__/
