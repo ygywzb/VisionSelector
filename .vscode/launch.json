@@ -8,12 +8,12 @@
       "program": "${workspaceFolder}/qwen-vl-finetune/qwenvl/train/train_qwen_selector_debug.py",
       "cwd": "${workspaceFolder}/qwen-vl-finetune",
       "console": "integratedTerminal",
-      "justMyCode": true,
+      // "justMyCode": false,
 
       "env": {
         "PYTHONPATH": "${workspaceFolder}",
         "PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT": "300",
-        "CUDA_VISIBLE_DEVICES": "0",
+        "CUDA_VISIBLE_DEVICES": "1", // 设置python可见的显卡号，这里他只能看到第1卡
         "TORCH_DISTRIBUTED_RUN_TIMEOUT": "3600"
       },
 
